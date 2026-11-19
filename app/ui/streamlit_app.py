@@ -72,17 +72,28 @@ tab_satu, tab_batch = st.tabs(["Satu mesin", "Banyak mesin (CSV)"])
 
 with tab_satu:
     with st.form("input"):
+        st.subheader("Data Pekerjaan")
         c1, c2 = st.columns(2)
         tipe = c1.selectbox("Tipe produk", ["L", "M", "H"], help="Kualitas produk yang sedang dikerjakan")
         shift = c2.selectbox("Shift operator", ["pagi", "siang", "malam"], index=2)
-        suhu_udara = c1.number_input("Suhu udara (K)", 250.0, 350.0, 301.2, 0.1)
-        suhu_proses = c2.number_input("Suhu proses (K)", 250.1, 400.0, 310.8, 0.1)
-        rpm = c1.number_input("Kecepatan (rpm)", 500.0, 4000.0, 1290.0, 10.0)
-        torsi = c2.number_input("Torsi (Nm)", 0.0, 150.0, 62.5, 0.5)
-        aus = c1.number_input("Keausan tool (menit)", 0.0, 500.0, 228.0, 1.0)
-        getar = c2.number_input("Getaran (mm/s)", 0.0, 50.0, 4.1, 0.1)
-        jam = c1.number_input("Jam sejak servis", 0.0, 10_000.0, 410.0, 1.0)
-        kirim = st.form_submit_button("Prediksi", type="primary", use_container_width=True)
+        
+        st.subheader("Suhu & Lingkungan")
+        c3, c4 = st.columns(2)
+        suhu_udara = c3.number_input("Suhu udara (K)", 250.0, 350.0, 301.2, 0.1)
+        suhu_proses = c4.number_input("Suhu proses (K)", 250.1, 400.0, 310.8, 0.1)
+        
+        st.subheader("Sensor Mekanis")
+        c5, c6 = st.columns(2)
+        rpm = c5.number_input("Kecepatan putar (rpm)", 500.0, 4000.0, 1290.0, 10.0)
+        torsi = c6.number_input("Torsi (Nm)", 0.0, 150.0, 62.5, 0.5)
+        aus = c5.number_input("Keausan tool (menit)", 0.0, 500.0, 228.0, 1.0)
+        getar = c6.number_input("Getaran (mm/s)", 0.0, 50.0, 4.1, 0.1)
+        
+        # Jam servis diletakkan di bawah sensor agar rapi
+        jam = c5.number_input("Jam sejak servis terakhir", 0.0, 10_000.0, 410.0, 1.0)
+        
+        st.write("") # Memberi jarak sebelum tombol
+        kirim = st.form_submit_button("Prediksi Kegagalan", type="primary", use_container_width=True)
 
     if kirim:
         row = {"tipe_produk": tipe, "suhu_udara_K": suhu_udara, "suhu_proses_K": suhu_proses,
@@ -94,11 +105,18 @@ with tab_satu:
             st.error(f"Gagal memprediksi: {e}")
         else:
             p = hasil["probabilitas_gagal"]
-            teks = f"Peluang gagal dalam 24 jam: **{p:.1%}** (threshold {hasil['threshold']})"
+            
+            # Tampilan Metrik Baru
+            mc1, mc2 = st.columns(2)
             if hasil["status"] == "SEGERA SERVIS":
-                st.error(f"### SEGERA SERVIS\n{teks}")
+                mc1.metric("Status Mesin", "⚠️ SEGERA SERVIS", delta="Kritis", delta_color="inverse")
+                mc2.metric("Peluang Gagal", f"{p:.1%}")
+                st.error("Mesin ini berisiko tinggi mengalami kegagalan dalam 24 jam ke depan. Segera jadwalkan pemeriksaan.")
             else:
-                st.success(f"### AMAN\n{teks}")
+                mc1.metric("Status Mesin", "✅ AMAN", delta="Normal", delta_color="normal")
+                mc2.metric("Peluang Gagal", f"{p:.1%}")
+                st.success("Kondisi mesin terpantau aman dan beroperasi dalam batas normal.")
+            
             st.progress(min(p, 1.0))
             with st.expander("Lihat request & response JSON"):
                 st.json({"request": row, "response": hasil})
@@ -127,5 +145,12 @@ with tab_batch:
                 out = out.sort_values("probabilitas_gagal", ascending=False)
                 n = int((out["status"] == "SEGERA SERVIS").sum())
                 st.metric("Mesin yang perlu segera diservis", f"{n} dari {len(out)}")
-                st.dataframe(out, use_container_width=True, hide_index=True)
+                
+                # Highlight baris berdasarkan status
+                def highlight_status(s):
+                    return ['background-color: #ffcccc; color: black' if v == 'SEGERA SERVIS' else '' for v in s]
+                
+                styled_df = out.style.apply(highlight_status, subset=['status'])
+                
+                st.dataframe(styled_df, use_container_width=True, hide_index=True)
                 st.download_button("Unduh hasil", out.to_csv(index=False).encode(), "hasil_prediksi.csv", "text/csv")
