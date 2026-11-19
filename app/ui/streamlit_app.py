@@ -2,11 +2,6 @@
 
 Jalankan dari root repo:
     streamlit run app/ui/streamlit_app.py
-
-Dua mode:
-- Mode A (API_URL kosong): model di-load langsung di sini. Paling gampang di-deploy.
-- Mode B (API_URL diisi, mis. https://xxx.hf.space): memanggil FastAPI lewat HTTP.
-  Isi lewat environment variable API_URL, atau di Streamlit Cloud: Settings → Secrets → API_URL = "https://..."
 """
 import os
 import sys
@@ -18,20 +13,20 @@ import streamlit as st
 
 ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
-    sys.path.insert(0, str(ROOT))  # Streamlit menjalankan file ini dari app/ui, jadi root repo ditambah manual
+    sys.path.insert(0, str(ROOT))
 from app import predictor  # noqa: E402
 
 
 def _api_url() -> str:
     try:
         url = st.secrets.get("API_URL", "")
-    except Exception:  # tidak ada secrets.toml: wajar saat lokal
+    except Exception:
         url = ""
     return (url or os.getenv("API_URL", "")).rstrip("/")
 
 
 API_URL = _api_url()
-TIMEOUT = 60  # detik; free tier yang sedang tidur butuh waktu untuk bangun
+TIMEOUT = 60  
 
 
 def prediksi(rows: list[dict]) -> list[dict]:
@@ -54,51 +49,77 @@ def info_model() -> dict:
     return r.json()
 
 
-st.set_page_config(page_title="Prediksi Kegagalan Mesin CNC", layout="centered")
-st.title("Prediksi kegagalan mesin CNC")
-st.caption("Isi kondisi mesin, dapatkan peluang mesin gagal dalam 24 jam ke depan.")
+# Konfigurasi Halaman (Lebih lebar)
+st.set_page_config(page_title="Dashboard Mesin CNC", page_icon="⚙️", layout="centered")
 
 try:
     META = info_model()
 except Exception as e:
-    st.error(f"Model belum siap: {e}")
+    st.error(f"Koneksi model terputus: {e}")
     st.stop()
 
 FITUR = META["fitur_input"]
-mode = f"Mode B · memanggil API {API_URL}" if API_URL else "Mode A · model di-load langsung"
-st.info(f"{mode} · versi model {META['versi_model']} · threshold {META['threshold']}")
 
-tab_satu, tab_batch = st.tabs(["Satu mesin", "Banyak mesin (CSV)"])
+# --- SIDEBAR (Informasi Sistem) ---
+with st.sidebar:
+    st.title("⚙️ Panel Sistem")
+    st.caption("Monitoring Prediktif Mesin CNC")
+    st.divider()
+    st.markdown("**Status Koneksi:**")
+    if API_URL:
+        st.success(f"🌐 Terhubung (Mode B)\n\nAPI: `{API_URL}`")
+    else:
+        st.info("💻 Lokal (Mode A)\n\nModel berjalan langsung di memori.")
+    
+    st.markdown("**Spesifikasi Model:**")
+    st.code(f"Versi  : {META['versi_model']}\nBatas  : {META['threshold']}", language="text")
 
+# --- HALAMAN UTAMA ---
+st.title("Prediksi Kegagalan Mesin")
+st.markdown("Masukkan parameter operasional saat ini untuk menganalisis risiko kegagalan *(downtime)* dalam 24 jam ke depan.")
+st.write("") # Jarak
+
+tab_satu, tab_batch = st.tabs(["🎛️ Input Manual", "📂 Analisis Batch (CSV)"])
+
+# --- TAB 1: INPUT MANUAL ---
 with tab_satu:
-    with st.form("input"):
-        st.subheader("Data Pekerjaan")
+    with st.form("input_form", border=True):
+        st.markdown("### 📋 Parameter Operasional")
+        
+        # Kelompok 1
+        st.markdown("##### 🏭 Profil Pekerjaan")
         c1, c2 = st.columns(2)
-        tipe = c1.selectbox("Tipe produk", ["L", "M", "H"], help="Kualitas produk yang sedang dikerjakan")
-        shift = c2.selectbox("Shift operator", ["pagi", "siang", "malam"], index=2)
+        tipe = c1.selectbox("Tipe Kualitas Produk", ["L", "M", "H"], help="L: Rendah, M: Menengah, H: Tinggi")
+        shift = c2.selectbox("Jadwal Shift", ["pagi", "siang", "malam"], index=2)
         
-        st.subheader("Suhu & Lingkungan")
+        st.divider()
+        
+        # Kelompok 2
+        st.markdown("##### 🌡️ Kondisi Suhu & Lingkungan")
         c3, c4 = st.columns(2)
-        suhu_udara = c3.number_input("Suhu udara (K)", 250.0, 350.0, 301.2, 0.1)
-        suhu_proses = c4.number_input("Suhu proses (K)", 250.1, 400.0, 310.8, 0.1)
+        suhu_udara = c3.number_input("Suhu Udara (K)", 250.0, 350.0, 301.2, 0.1)
+        suhu_proses = c4.number_input("Suhu Proses (K)", 250.1, 400.0, 310.8, 0.1)
         
-        st.subheader("Sensor Mekanis")
+        st.divider()
+
+        # Kelompok 3
+        st.markdown("##### ⚙️ Sensor Mekanis & Pemeliharaan")
         c5, c6 = st.columns(2)
-        rpm = c5.number_input("Kecepatan putar (rpm)", 500.0, 4000.0, 1290.0, 10.0)
+        rpm = c5.number_input("Kecepatan Putar (rpm)", 500.0, 4000.0, 1290.0, 10.0)
         torsi = c6.number_input("Torsi (Nm)", 0.0, 150.0, 62.5, 0.5)
-        aus = c5.number_input("Keausan tool (menit)", 0.0, 500.0, 228.0, 1.0)
-        getar = c6.number_input("Getaran (mm/s)", 0.0, 50.0, 4.1, 0.1)
+        aus = c5.number_input("Keausan Tool (menit)", 0.0, 500.0, 228.0, 1.0)
+        getar = c6.number_input("Tingkat Getaran (mm/s)", 0.0, 50.0, 4.1, 0.1)
+        jam = st.number_input("Durasi Sejak Servis Terakhir (Jam)", 0.0, 10_000.0, 410.0, 1.0)
         
-        # Jam servis diletakkan di bawah sensor agar rapi
-        jam = c5.number_input("Jam sejak servis terakhir", 0.0, 10_000.0, 410.0, 1.0)
-        
-        st.write("") # Memberi jarak sebelum tombol
-        kirim = st.form_submit_button("Prediksi Kegagalan", type="primary", use_container_width=True)
+        st.write("")
+        kirim = st.form_submit_button("🔍 Jalankan Analisis")
 
     if kirim:
         row = {"tipe_produk": tipe, "suhu_udara_K": suhu_udara, "suhu_proses_K": suhu_proses,
                "kecepatan_rpm": rpm, "torsi_Nm": torsi, "keausan_tool_menit": aus,
                "getaran_mm_s": getar, "jam_sejak_servis": jam, "shift_operator": shift}
+        
+        st.markdown("### 📊 Hasil Analisis")
         try:
             hasil = prediksi([row])[0]
         except Exception as e:
@@ -106,51 +127,66 @@ with tab_satu:
         else:
             p = hasil["probabilitas_gagal"]
             
-            # Tampilan Metrik Baru
             mc1, mc2 = st.columns(2)
             if hasil["status"] == "SEGERA SERVIS":
-                mc1.metric("Status Mesin", "⚠️ SEGERA SERVIS", delta="Kritis", delta_color="inverse")
+                mc1.metric("Rekomendasi Tindakan", "⚠️ SEGERA SERVIS", delta="Kritis", delta_color="inverse")
                 mc2.metric("Peluang Gagal", f"{p:.1%}")
-                st.error("Mesin ini berisiko tinggi mengalami kegagalan dalam 24 jam ke depan. Segera jadwalkan pemeriksaan.")
+                st.error("**Tindakan Diperlukan:** Parameter menunjukkan anomali risiko tinggi. Hentikan operasi atau jadwalkan pemeriksaan teknis segera.")
             else:
-                mc1.metric("Status Mesin", "✅ AMAN", delta="Normal", delta_color="normal")
+                mc1.metric("Rekomendasi Tindakan", "✅ AMAN", delta="Normal", delta_color="normal")
                 mc2.metric("Peluang Gagal", f"{p:.1%}")
-                st.success("Kondisi mesin terpantau aman dan beroperasi dalam batas normal.")
+                st.success("**Status Operasional:** Mesin beroperasi dalam batas parameter yang aman. Lanjutkan proses produksi.")
             
             st.progress(min(p, 1.0))
-            with st.expander("Lihat request & response JSON"):
+            
+            with st.expander("🛠️ Log Data (JSON)"):
                 st.json({"request": row, "response": hasil})
 
+# --- TAB 2: ANALISIS BATCH ---
 with tab_batch:
-    st.write("Upload CSV dengan kolom: " + ", ".join(f"`{k}`" for k in FITUR))
+    st.markdown("### 📂 Unggah Data Historis (CSV)")
+    st.write("Analisis puluhan mesin secara bersamaan menggunakan file CSV. Pastikan kolom sesuai format sistem.")
+    
     contoh = ROOT / "data" / "contoh_batch.csv"
     if contoh.exists():
-        st.download_button("Unduh contoh CSV", contoh.read_bytes(), "contoh_batch.csv", "text/csv")
-    up = st.file_uploader("CSV", type="csv")
+        st.download_button("📥 Unduh Format CSV Contoh", contoh.read_bytes(), "contoh_batch.csv", "text/csv")
+    
+    st.write("")
+    up = st.file_uploader("Seret dan lepas file CSV di sini", type="csv")
+    
     if up is not None:
         df = pd.read_csv(up)
         kurang = [k for k in FITUR if k not in df.columns]
         if kurang:
-            st.error(f"Kolom kurang: {kurang}")
+            st.error(f"Format tidak valid! Kolom berikut hilang: {kurang}")
         else:
             df["shift_operator"] = df["shift_operator"].astype(str).str.strip().str.lower()
             X = df[FITUR]
-            rows = X.astype(object).where(X.notna(), None).to_dict("records")  # NaN → null supaya valid JSON
-            try:
-                hasil = pd.DataFrame(prediksi(rows))
-            except Exception as e:
-                st.error(f"Gagal memprediksi: {e}")
-            else:
-                out = pd.concat([df.reset_index(drop=True), hasil[["probabilitas_gagal", "status"]]], axis=1)
-                out = out.sort_values("probabilitas_gagal", ascending=False)
-                n = int((out["status"] == "SEGERA SERVIS").sum())
-                st.metric("Mesin yang perlu segera diservis", f"{n} dari {len(out)}")
-                
-                # Highlight baris berdasarkan status
-                def highlight_status(s):
-                    return ['background-color: #ffcccc; color: black' if v == 'SEGERA SERVIS' else '' for v in s]
-                
-                styled_df = out.style.apply(highlight_status, subset=['status'])
-                
-                st.dataframe(styled_df, use_container_width=True, hide_index=True)
-                st.download_button("Unduh hasil", out.to_csv(index=False).encode(), "hasil_prediksi.csv", "text/csv")
+            rows = X.astype(object).where(X.notna(), None).to_dict("records")
+            
+            with st.spinner('Menganalisis data...'):
+                try:
+                    hasil = pd.DataFrame(prediksi(rows))
+                except Exception as e:
+                    st.error(f"Gagal memprediksi: {e}")
+                else:
+                    out = pd.concat([df.reset_index(drop=True), hasil[["probabilitas_gagal", "status"]]], axis=1)
+                    out = out.sort_values("probabilitas_gagal", ascending=False)
+                    n = int((out["status"] == "SEGERA SERVIS").sum())
+                    
+                    st.divider()
+                    st.markdown("### 📑 Ringkasan Batch")
+                    
+                    # Highlight baris kritis
+                    def highlight_status(s):
+                        return ['background-color: #ffcccc; color: black; font-weight: bold' if v == 'SEGERA SERVIS' else '' for v in s]
+                    
+                    styled_df = out.style.apply(highlight_status, subset=['status'])
+                    
+                    if n > 0:
+                        st.warning(f"**Peringatan:** Ditemukan **{n} mesin** dengan risiko kerusakan tinggi dari total {len(out)} mesin.")
+                    else:
+                        st.success(f"Seluruh {len(out)} mesin dalam kondisi aman.")
+                        
+                    st.dataframe(styled_df, hide_index=True)
+                    st.download_button("📤 Ekspor Hasil Laporan (CSV)", out.to_csv(index=False).encode(), "laporan_prediksi.csv", "text/csv")
